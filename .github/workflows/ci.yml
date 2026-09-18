@@ -19,7 +19,21 @@ jobs:
       - name: Install Linux webview dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+          sudo apt-get install -y libgtk-3-dev
+          # The Go binding hardcodes `pkg-config: webkit2gtk-4.0`, but Ubuntu 24.04 only
+          # ships 4.1. webview.h dlopen's "libwebkit2gtk-4.1.so" first and falls back to
+          # 4.0, so building against 4.1 headers is correct — pkg-config just needs to
+          # answer to the 4.0 name. Prefer the real 4.0 package where it exists.
+          if sudo apt-get install -y libwebkit2gtk-4.0-dev; then
+          echo "Linux deps: webkit2gtk-4.0"
+          else
+          sudo apt-get install -y libwebkit2gtk-4.1-dev
+          mkdir -p "$HOME/pc"
+          ln -sf /usr/lib/*/pkgconfig/webkit2gtk-4.1.pc "$HOME/pc/webkit2gtk-4.0.pc"
+          ls -l "$HOME/pc"
+          echo "PKG_CONFIG_PATH=$HOME/pc" >> "$GITHUB_ENV"
+          echo "Linux deps: webkit2gtk-4.1 aliased as 4.0"
+          fi
       - run: go vet ./...
         working-directory: clients/go
       - run: go test -count=1 ./...
@@ -38,7 +52,10 @@ jobs:
       - name: Syntax checks
         working-directory: clients/electron
         run: |
-          for f in src/main/*.js src/preload.js src/renderer/app.js src/renderer/bridge.js; do
+          # bridge.js is Go-only (it is the webview transport shim), so glob instead of
+          # listing files that may not exist here.
+          for f in src/main/*.js src/preload.js src/renderer/*.js cli*/**/*.js; do
+            [ -f "$f" ] || continue
             node --check "$f"
           done
       - name: Fixture-free tests

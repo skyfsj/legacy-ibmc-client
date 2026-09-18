@@ -178,7 +178,15 @@ jobs:
           The Electron build is not packaged here — run it from source, see the README.
           EOF
           )
-          gh release create "$TAG" artifacts/* \
-            --title "$TAG" \
-            --notes "$notes" \
-            --verify-tag
+          # This job has no checkout, so there is no .git for gh to infer the repository
+          # from — pass it explicitly. Re-running for a tag that already has a release
+          # uploads into the existing one instead of failing.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" artifacts/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --notes "$notes" \
+              --verify-tag
+          fi

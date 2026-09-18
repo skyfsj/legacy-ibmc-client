@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'" />
+  <title>iBMC 远程控制台</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ============ 会话管理器 ============ -->
+  <section id="home" class="home">
+    <header class="homeHead">
+      <h1>iBMC 远程控制台</h1>
+    </header>
+
+    <div class="homeBody">
+      <!-- 机器列表 -->
+      <aside class="listPane">
+        <div class="paneHead">
+          <span>机器</span>
+          <button id="btnNew" class="mini" title="新建">＋ 新建</button>
+        </div>
+        <ul id="sessList" class="sessList"></ul>
+        <div id="sessEmpty" class="empty">还没有保存的机器。<br />在右侧填写后点「连接并保存」。</div>
+      </aside>
+
+      <!-- 编辑/新建 -->
+      <div class="formPane">
+        <div class="paneHead"><span id="formTitle">新建连接</span></div>
+        <div class="grid">
+          <label class="wide">名称
+            <input id="fName" type="text" placeholder="留空则用地址" />
+          </label>
+          <label>地址 <input id="fHost" type="text" placeholder="192.168.1.100" /></label>
+          <label>HTTPS 端口 <input id="fPort" type="number" value="443" /></label>
+          <label>用户名 <input id="fUser" type="text" value="root" /></label>
+          <label>密码 <input id="fPass" type="password" /></label>
+          <label>色深
+            <select id="fColorBit">
+              <option value="2" selected>8 bit</option>
+              <option value="1">7 bit</option>
+              <option value="0">6 bit</option>
+              <option value="3">4 bit</option>
+            </select>
+          </label>
+          <label class="check" title="勾选后密码用系统钥匙串加密保存；不勾选则完全不保存密码。">
+            <input id="fRemember" type="checkbox" checked />
+            <span>记住密码</span>
+          </label>
+          <div id="pwStoreHint" class="storeHint hidden"></div>
+        </div>
+        <div class="actions">
+          <button id="btnConnect" class="primary">连接</button>
+          <button id="btnSaveOnly" class="hidden">保存修改</button>
+          <button id="btnPick">用 JNLP 文件连接…</button>
+        </div>
+        <div id="homeErr" class="err"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 远程控制台 ============ -->
+  <section id="console" class="console hidden">
+    <div class="toolbar">
+      <span id="status" class="status">未连接</span>
+      <span class="sep"></span>
+
+      <div class="menu" id="menuPower">
+        <button class="caret">电源</button>
+        <div class="menuList">
+          <button data-power="33">开机</button>
+          <div class="sep"></div>
+          <button data-power="32" class="danger">关机</button>
+          <button data-power="34" class="danger">重启</button>
+          <button data-power="35" class="danger">安全重启</button>
+          <button data-power="37" class="danger">保存并关机</button>
+          <div class="sep"></div>
+          <button data-power="48">复位 USB</button>
+        </div>
+      </div>
+
+      <div class="menu" id="menuMedia">
+        <button class="caret">虚拟介质</button>
+        <div class="menuList">
+          <button data-media="iso">挂载 ISO<span class="dim">（光驱）</span></button>
+          <button data-media="floppy">挂载软盘镜像<span class="dim">（.img）</span></button>
+          <div class="sep"></div>
+          <button data-media="detach">卸载</button>
+          <button data-media="status">查看状态</button>
+        </div>
+      </div>
+
+      <button id="btnCad" title="Ctrl + Alt + Del">Ctrl+Alt+Del</button>
+      <button id="btnIframe" title="请求关键帧">刷新画面</button>
+
+      <span class="sep"></span>
+      <label class="range" title="JPEG 量化档位：越高越清晰、带宽越大">画质
+        <input id="dqt" type="range" min="10" max="100" step="10" value="70" />
+        <span id="dqtVal">70</span>
+      </label>
+
+      <div class="menu" id="menuZoom">
+        <button class="caret" title="缩放方式"><span id="zoomLabel" class="dim">—</span> 缩放</button>
+        <div class="menuList">
+          <button data-zoom="int">整数倍<span class="dim">无损</span></button>
+          <button data-zoom="fit">适应窗口<span class="dim">可能发糊</span></button>
+          <div class="sep"></div>
+          <button data-zoom="1">100%</button>
+          <button data-zoom="1.5">150%</button>
+          <button data-zoom="2">200%</button>
+          <button data-zoom="0.5">50%</button>
+        </div>
+      </div>
+
+      <span class="grow"></span>
+      <span id="inputState" class="status hidden">输入：—</span>
+      <button id="btnDebug" class="toggle" title="显示输入/协议调试信息">调试</button>
+      <button id="btnStats">统计</button>
+      <button id="btnLog">日志</button>
+      <button id="btnDisconnect">断开</button>
+    </div>
+    <div id="stage">
+      <div id="canvasWrap">
+        <canvas id="screen" tabindex="0"></canvas>
+      </div>
+      <div id="overlay" class="overlay"></div>
+    </div>
+  </section>
+
+  <!-- ============ 模态：输入密码 ============ -->
+  <dialog id="pwDlg" class="dlg narrow">
+    <div class="dlgHead">
+      <h2 id="pwTitle">需要密码</h2>
+    </div>
+    <div class="dlgBody">
+      <p class="dlgTarget" id="pwTarget">—</p>
+      <label class="pwField">密码
+        <input id="pwInput" type="password" autocomplete="off" />
+      </label>
+      <label class="check">
+        <input id="pwRemember" type="checkbox" checked />
+        <span>记住密码</span>
+      </label>
+      <p class="dlgHint" id="pwHint"></p>
+    </div>
+    <div class="dlgFoot">
+      <button id="btnPwOk" class="primary">连接</button>
+      <button id="btnPwCancel">取消</button>
+    </div>
+  </dialog>
+
+  <!-- ============ 模态：保存这台机器？ ============ -->
+  <dialog id="saveDlg" class="dlg narrow">
+    <div class="dlgHead">
+      <h2>保存这台机器？</h2>
+    </div>
+    <div class="dlgBody">
+      <p class="dlgTarget" id="saveTarget">—</p>
+      <label class="check">
+        <input id="saveRemember" type="checkbox" checked />
+        <span>记住密码</span>
+      </label>
+      <p class="dlgHint">不保存也可以继续使用本次连接。</p>
+    </div>
+    <div class="dlgFoot">
+      <button id="btnSaveYes" class="primary">保存</button>
+      <button id="btnSaveNo">不保存，仅本次连接</button>
+    </div>
+  </dialog>
+
+  <!-- ============ 模态：统计 ============ -->
+  <dialog id="statsDlg" class="dlg">
+    <div class="dlgHead">
+      <h2>统计</h2>
+      <button class="mini" data-close>关闭</button>
+    </div>
+    <pre id="statsPre">—</pre>
+  </dialog>
+
+  <!-- ============ 模态：日志 ============ -->
+  <dialog id="logDlg" class="dlg wide">
+    <div class="dlgHead">
+      <h2>日志</h2>
+      <span class="grow"></span>
+      <button class="mini" id="btnCopyLog">复制</button>
+      <button class="mini" id="btnClearLog">清空</button>
+      <button class="mini" data-close>关闭</button>
+    </div>
+    <pre id="logPre"></pre>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

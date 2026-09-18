@@ -1,0 +1,27 @@
+# ---- never commit: real session material & captured device data ----
+*.jnlp
+**/evidence/
+**/*.bin
+!clients/**/testdata/synthetic/**
+*.pcap
+*.pcapng
+kvm-proxy*
+
+# ---- build artifacts ----
+clients/go/ibmc-kvm
+clients/go/*.app/
+node_modules/
+*.dmg
+*.AppImage
+*.exe
+
+# ---- test output ----
+clients/electron/test/decoder-output.*
+dist/
+build/
+
+# ---- editor / OS ----
+.DS_Store
+*.swp
+.idea/
+.vscode/

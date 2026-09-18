@@ -31,39 +31,6 @@ BMC ──HTTPS──> login + session JNLP
 - **Quality and zoom** — JPEG quality slider, and a lossless integer zoom mode.
 - **Two builds** — Go + system webview (6.6 MB) or Electron (cross-platform packaging).
 
-## How it is verified
-
-The protocol work is backed by a real device capture, and the tests assert **measured byte
-values** rather than internal consistency: CRC results, rebuilt frames, chunk boundaries,
-INQUIRY payloads, block counts.
-
-The strongest single check: a real captured frame decodes to **130/130 blocks, 5129/5129
-bytes consumed, 0 JPEG errors**, and four independent implementations (Go, Node,
-Chromium's JPEG decoder, Python/Pillow) agree on the result.
-
-Also confirmed against a live BMC: the HTTPS login flow, the TCP handshake and suite
-negotiation, and that a password written by the Electron build decrypts in the Go build.
-
-### Not yet done
-
-- **The virtual media channel is ported from the vendor client's logic but has never run
-  against a device.** The byte layouts are pinned by tests; the first real mount may need
-  iteration.
-- **Keyboard/mouse events are captured and transmitted, but their effect on the remote
-  OS is untested** (no live session was available with credentials).
-- **RLE video blocks** are implemented from source; the captured frames only ever
-  contained JPEG and copy blocks.
-- Only one blade is supported (fine for the single-blade model this was built for).
-
-### Gotchas worth knowing
-
-- **Use the `整数倍（无损）` zoom.** Any fractional downscale must either blur the image or
-  (with nearest-neighbour) drop whole pixel rows, which slices thin console text.
-- **JNLP sessions are single-use** and the console port allows one client at a time — both
-  clients re-login on every connect for this reason.
-- **Power commands are encrypted inside a `0x33` frame**, so they cannot be identified from
-  a capture. They are sent only after an explicit confirmation.
-
 ## Quick start
 
 ### Go + system webview (recommended — ~6.6 MB, ~200 MB RAM)
@@ -88,46 +55,6 @@ npm start
 
 Both clients share the same config file and the same password storage, so saved machines
 and credentials carry over between them.
-
----
-
-## Why not a web page?
-
-The console channel is **raw TCP on port 2198**. Browsers expose no arbitrary-socket API,
-so a pure web page cannot speak it — and WASM does not change that:
-
-- WASM has **no I/O of its own**; it can only call what the host imports, and in a browser
-  the host offers exactly the Web APIs JS already has. Its capability ceiling is JS's.
-- WASI defines sockets, but **browsers do not implement them** — only standalone runtimes
-  (Wasmtime, Node) do, which is a native process again.
-- The one real exception is Chrome's **Direct Sockets API**, and it is restricted to
-  *Isolated Web Apps* (signed bundles installed by policy). Verified on Chrome 152: the
-  constructors appear behind `--enable-features=IsolatedWebApps,IsolatedWebAppDevMode`,
-  but a plain page that touches `TCPSocket` wedges immediately.
-
-Hence a desktop app. The Go build keeps the footprint small by using the system webview
-instead of bundling a browser engine.
-
----
-
-## Protocol highlights
-
-The interesting parts, all documented with byte layouts in [`docs/protocol/`](docs/protocol/):
-
-- **The two directions use different framings.** Client→BMC is
-  `FE F6 | len | codeKey(4B) | CRC16 | payload`; BMC→client is `FE F6 00 | len(1B≤250) | payload`
-  with **no CRC and no key**. Frames tile byte-exactly.
-- **Key chain**: the JNLP `decrykey` (32 B) splits into an AES key and IV; suite negotiation
-  derives a 24-byte `encodeKey` (PBKDF2, then each 4-byte group reversed); after connecting the
-  BMC sends a 48-byte secret that becomes `kvm_key` — sliced into a data key, a keyboard key,
-  and a shared IV.
-- **Video is 64×64 blocks.** Each block is one descriptor byte: RLE (4 variants), a JPEG block
-  carrying **raw entropy-coded scan data only** (the client synthesises the JPEG headers from
-  10 built-in quantization tables), or a "copy the block above / to the left" reference which
-  is how unchanged regions cost one byte.
-- **The keyboard is a USB HID boot report** (modifier byte + 6 usage IDs).
-- **The BMC does not validate the client frame's CRC or codeKey** for suite negotiation, but
-  frames must be written one-per-`write()` — it does not reassemble TCP splits.
 
 ---
 

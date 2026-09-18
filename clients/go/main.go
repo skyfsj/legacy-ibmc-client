@@ -605,6 +605,9 @@ func assetsDir() string {
 
 func replayW64(v int) int { return (v + 63) / 64 }
 
+// version is stamped by the release workflow via -ldflags "-X main.version=...".
+var version = "dev"
+
 var (
 	replayPath string
 	replayW    = 800
@@ -621,7 +624,13 @@ func main() {
 	flag.IntVar(&replayW, "w", 800, "replaytest: width")
 	flag.IntVar(&replayH, "h", 600, "replaytest: height")
 	flag.IntVar(&replayDqt, "dqt", 6, "replaytest: quantization table index")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("ibmc-kvm " + version)
+		os.Exit(0)
+	}
 
 	url, err := serveAssets(assetsDir())
 	if err != nil {

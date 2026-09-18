@@ -1,0 +1,156 @@
+name: Release
+
+# Tag a commit (e.g. `git tag v0.1.0 && git push origin v0.1.0`) to build the client for
+# every supported platform and attach the archives to a GitHub Release.
+# Can also be run manually from the Actions tab (artifacts only, no Release).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: clients/go/go.sum
+      # The webview binding needs cgo, so even the test job needs the GTK/WebKit headers.
+      - name: Install Linux webview dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+      - name: go vet
+        working-directory: clients/go
+        run: go vet ./...
+      - name: go test
+        working-directory: clients/go
+        run: go test -count=1 ./...
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Go's webview binding uses cgo, so each target is built on a matching
+          # runner rather than cross-compiled.
+          - { os: macos-latest,    goarch: arm64, name: macos-arm64,   archive: tar.gz }
+          - { os: macos-latest,    goarch: amd64, name: macos-amd64,   archive: tar.gz }
+          - { os: ubuntu-latest,   goarch: amd64, name: linux-amd64,   archive: tar.gz }
+          - { os: ubuntu-24.04-arm, goarch: arm64, name: linux-arm64,  archive: tar.gz }
+          - { os: windows-latest,  goarch: amd64, name: windows-amd64, archive: zip }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: clients/go/go.sum
+
+      - name: Install Linux webview dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+
+      # windows-latest ships MSYS2; the webview binding needs a C/C++ compiler for cgo.
+      # WebView2.h is vendored by the module (libs/mswebview2), so no SDK download.
+      - name: Set up MinGW (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          install: mingw-w64-x86_64-gcc
+          path-type: inherit
+
+      - name: Build
+        working-directory: clients/go
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION:-dev}" \
+            -o "dist/ibmc-kvm${ext}" .
+          ./dist/ibmc-kvm${ext} --version
+
+      - name: Package
+        working-directory: clients/go
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The binary looks for `web/` next to itself (or ../Resources/web in a .app),
+          # so the archive must keep that layout.
+          cp -R web dist/web
+          cp README.md dist/README.md 2>/dev/null || true
+          cd dist
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a -tzip "../ibmc-kvm-${{ matrix.name }}.zip" . >/dev/null
+          else
+            tar czf "../ibmc-kvm-${{ matrix.name }}.tar.gz" .
+          fi
+          cd ..
+          ls -l "ibmc-kvm-${{ matrix.name }}.${{ matrix.archive }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ibmc-kvm-${{ matrix.name }}
+          path: clients/go/ibmc-kvm-${{ matrix.name }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -l artifacts
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes=$(cat <<'EOF'
+          Native console client for older Huawei iBMC / FusionServer BMCs. No Java.
+
+          **Go client** — protocol layer in Go, UI in the system webview (WKWebView /
+          WebView2 / WebKitGTK). No browser engine is bundled.
+
+          Each archive contains the `ibmc-kvm` binary and the `web/` assets it needs;
+          keep them in the same directory.
+
+          | platform | notes |
+          |---|---|
+          | macOS arm64 / amd64 | uses the system WKWebView; no extra runtime |
+          | Windows amd64 | needs the WebView2 runtime (present on Windows 10 1803+ / 11) |
+          | Linux amd64 / arm64 | needs `libwebkit2gtk-4.1-0` at runtime |
+
+          If no system webview is available the client falls back to driving an installed
+          Chromium-family browser in `--app` mode.
+
+          The Electron build is not packaged here — run it from source, see the README.
+          EOF
+          )
+          gh release create "$TAG" artifacts/* \
+            --title "$TAG" \
+            --notes "$notes" \
+            --verify-tag

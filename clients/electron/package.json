@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Cross-platform Huawei iBMC KVM console client (no Java, no backend)",
+  "license": "Apache-2.0",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
@@ -13,10 +14,45 @@
     "test:gui": "electron . --selftest",
     "test:chromium": "electron . --replaytest ../huawei-ibmc-kvm-protocol/evidence/frame-2.bin 800 600 6",
     "test:all": "npm test && npm run test:store && npm run test:gui && npm run test:chromium",
-    "gen-tables": "python3 tools/gen-jpeg-tables.py src/renderer/jpeg-tables.js"
+    "gen-tables": "python3 tools/gen-jpeg-tables.py src/renderer/jpeg-tables.js",
+    "dist": "electron-builder --publish never",
+    "dist:mac": "electron-builder --mac zip --publish never",
+    "dist:win": "electron-builder --win zip --publish never",
+    "dist:linux": "electron-builder --linux tar.gz --publish never"
   },
   "devDependencies": {
     "electron": "^44.4.2",
+    "electron-builder": "^26.15.3",
     "jpeg-js": "^0.4.4"
+  },
+  "build": {
+    "appId": "io.github.skyfsj.legacy-ibmc-client",
+    "productName": "iBMC KVM Console",
+    "artifactName": "ibmc-kvm-full-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist-full"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.utilities",
+      "identity": "-"
+    },
+    "win": {
+      "target": [
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "tar.gz"
+      ],
+      "category": "Utility"
+    }
   }
 }

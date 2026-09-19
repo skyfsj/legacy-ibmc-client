@@ -164,6 +164,25 @@ npm start
 > 如果报 `Cannot find native binding ... @electron-internal/extract-zip`
 > （npm 的可选依赖已知 bug），删掉 `node_modules` 和 `package-lock.json` 再装一次。
 
+### 打包
+
+```bash
+npm run dist:mac      # macOS → dist-full/ibmc-kvm-full-mac-<arch>.zip
+npm run dist:win      # Windows → dist-full/ibmc-kvm-full-win-x64.zip
+npm run dist:linux    # Linux → dist-full/ibmc-kvm-full-linux-<arch>.tar.gz
+npm run dist          # 当前平台
+```
+
+产物解压后自带 Chromium，不需要系统 webview，代价是解压后约 200 MB。
+
+macOS 包用 `package.json` 里的 `"mac": { "identity": "-" }` 做 ad-hoc 签名：不需要证书，
+下载后右键 →「打开」即可。不加签名的话签名状态是「未绑定」，用户会看到「已损坏，请移到废纸篓」，
+只能靠 `xattr -dr com.apple.quarantine` 解隔离。
+
+> 打包前删掉 `package-lock.json`：锁文件记录的是生成它的那个平台的可选依赖，而 Electron
+> 自己的可选依赖（`@electron-internal/extract-zip`）正好是跨平台会出问题的那个，见上面的安装坑。
+> 仓库因此不提交锁文件，CI 也用 `npm install` 而不是 `npm ci`。
+
 ### 验证（不需要登录、不需要 BMC）
 
 ```bash

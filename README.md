@@ -31,7 +31,21 @@ BMC ──HTTPS──> login + session JNLP
 - **Quality and zoom** — JPEG quality slider, and a lossless integer zoom mode.
 - **Two builds** — Go + system webview (6.6 MB) or Electron (cross-platform packaging).
 
-## Quick start
+## Downloads
+
+[Releases](https://github.com/skyfsj/legacy-ibmc-client/releases) carry prebuilt archives
+for macOS (arm64 / amd64), Windows (amd64) and Linux (amd64 / arm64), in two flavours:
+
+| archive | what it is |
+|---|---|
+| `ibmc-kvm-<platform>` | the Go client — ~3 MB, uses the system webview, nothing to install beyond it |
+| `ibmc-kvm-full-<platform>` | the Electron client — bundles its own Chromium (~200 MB unpacked), for machines with no usable system webview |
+
+The Electron archives are ad-hoc signed on macOS and unsigned on Windows, so the system
+warns about an unidentified developer the first time you open one (on macOS: right-click →
+Open, or `xattr -dr com.apple.quarantine`).
+
+## Build from source
 
 ### Go + system webview (recommended — ~6.6 MB, ~200 MB RAM)
 

@@ -139,9 +139,59 @@ jobs:
           path: clients/go/ibmc-kvm-${{ matrix.name }}.${{ matrix.archive }}
           if-no-files-found: error
 
+  # The Electron client bundles its own Chromium, so it is the flavour that runs
+  # without a system webview. Each target is packaged on a matching runner.
+  full:
+    name: Package ${{ matrix.name }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest,     name: macos-arm64,   args: '--mac zip --arm64' }
+          - { os: macos-latest,     name: macos-amd64,   args: '--mac zip --x64' }
+          - { os: ubuntu-latest,    name: linux-amd64,   args: '--linux tar.gz --x64' }
+          - { os: ubuntu-24.04-arm, name: linux-arm64,   args: '--linux tar.gz --arm64' }
+          - { os: windows-latest,   name: windows-amd64, args: '--win zip --x64' }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Deliberately `npm install` without a committed lock file: the lock records the
+      # platform-specific optional dependencies of the machine that generated it, and
+      # Electron's own optional dep is the one that breaks across platforms. See the
+      # note on this in clients/electron/README.md.
+      - name: Install dependencies
+        working-directory: clients/electron
+        run: npm install --no-audit --no-fund
+
+      - name: Package
+        working-directory: clients/electron
+        shell: bash
+        run: |
+          set -euo pipefail
+          # mac.identity is "-" in package.json: the mac build is ad-hoc signed. That
+          # needs no certificate, and it is what lets a downloaded .app open through
+          # right-click -> Open instead of being reported as damaged.
+          npx electron-builder ${{ matrix.args }} --publish never
+          ls -l dist-full
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ibmc-kvm-full-${{ matrix.name }}
+          # Only the archives — electron-builder also leaves an unpacked tree behind.
+          path: |
+            clients/electron/dist-full/*.zip
+            clients/electron/dist-full/*.tar.gz
+          if-no-files-found: error
+
   release:
     name: Publish Release
-    needs: build
+    needs: [build, full]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -160,22 +210,31 @@ jobs:
           notes=$(cat <<'EOF'
           Native console client for older Huawei iBMC / FusionServer BMCs. No Java.
 
-          **Go client** — protocol layer in Go, UI in the system webview (WKWebView /
-          WebView2 / WebKitGTK). No browser engine is bundled.
+          Two flavours are attached for every platform, both speaking the same protocol
+          and sharing the same UI — pick whichever suits the machine.
 
-          Each archive contains the `ibmc-kvm` binary and the `web/` assets it needs;
-          keep them in the same directory.
+          **`ibmc-kvm-<platform>` — Go client (smallest)**
 
-          | platform | notes |
-          |---|---|
-          | macOS arm64 / amd64 | uses the system WKWebView; no extra runtime |
-          | Windows amd64 | needs the WebView2 runtime (present on Windows 10 1803+ / 11) |
-          | Linux amd64 / arm64 | needs `libwebkit2gtk-4.1-0` at runtime |
+          Protocol layer in Go, UI in the system webview (WKWebView / WebView2 /
+          WebKitGTK). No browser engine is bundled, so the archive is about 3 MB.
+          Each one contains the `ibmc-kvm` binary and the `web/` assets it needs;
+          keep them in the same directory. If no system webview is available the
+          client falls back to driving an installed Chromium-family browser in
+          `--app` mode.
 
-          If no system webview is available the client falls back to driving an installed
-          Chromium-family browser in `--app` mode.
+          **`ibmc-kvm-full-<platform>` — Electron build (self-contained)**
 
-          The Electron build is not packaged here — run it from source, see the README.
+          The same UI and protocol code with Chromium bundled, for machines where no
+          usable system webview exists. Expect roughly 200 MB unpacked.
+
+          | platform | Go client | Electron build |
+          |---|---|---|
+          | macOS arm64 / amd64 | uses the system WKWebView; no extra runtime | ad-hoc signed `.app` in a zip — first launch needs right-click → Open, or `xattr -dr com.apple.quarantine` |
+          | Windows amd64 | needs the WebView2 runtime (present on Windows 10 1803+ / 11) | unpack and run; no runtime needed |
+          | Linux amd64 / arm64 | needs `libwebkit2gtk-4.1-0` at runtime | unpack and run; needs a desktop session |
+
+          The Electron builds are ad-hoc signed on macOS and unsigned on Windows, so the
+          operating system will warn about an unidentified developer on first launch.
           EOF
           )
           # This job has no checkout, so there is no .git for gh to infer the repository
